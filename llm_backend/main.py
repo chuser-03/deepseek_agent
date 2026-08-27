@@ -1,8 +1,9 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File, Query, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 from typing import List, Dict, Optional
+from fastapi import Request
 from app.services.llm_factory import LLMFactory
 from app.services.search_service import SearchService
 from fastapi.staticfiles import StaticFiles
@@ -283,14 +284,29 @@ async def update_conversation_name(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/langgraph/query")
-async def langgraph_query(
-    query: str = Form(...),
-    user_id: int = Form(...),
-    conversation_id: Optional[str] = Form(None),
-    image: Optional[UploadFile] = File(None)
-):
+async def langgraph_query(request: Request):
     """使用LangGraph处理用户查询，支持图片上传"""
     try:
+        # 支持 JSON 和 FormData 两种格式
+        content_type = request.headers.get("content-type", "")
+        
+        if "application/json" in content_type:
+            body = await request.json()
+            query = body.get("query", "")
+            user_id = body.get("user_id", 0)
+            conversation_id = body.get("conversation_id")
+            image = None
+        else:
+            form = await request.form()
+            query = form.get("query", "")
+            user_id = form.get("user_id", 0)
+            conversation_id = form.get("conversation_id")
+            image = form.get("image")
+        
+        if not query:
+            raise HTTPException(status_code=400, detail="query is required")
+            
+        user_id = int(user_id) if user_id else 0
         logger.info(f"Processing LangGraph query for user {user_id} and conversation {conversation_id}")
         
         # 处理图片上传
@@ -484,4 +500,18 @@ async def upload_image(
 
 # 最后挂载静态文件，并确保使用绝对路径
 STATIC_DIR = Path(__file__).parent / "static" / "dist"
-app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
+
+# SPA 路由支持 - 所有非 API 路径返回 index.html
+from fastapi.responses import FileResponse
+
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str):
+    # API 路径不拦截
+    if full_path.startswith("api/") or full_path.startswith("docs") or full_path.startswith("openapi"):
+        raise HTTPException(status_code=404, detail="Not Found")
+    # 尝试返回静态文件
+    file_path = STATIC_DIR / full_path
+    if file_path.is_file():
+        return FileResponse(file_path)
+    # 其他路径返回 index.html (SPA 路由)
+    return FileResponse(STATIC_DIR / "index.html")

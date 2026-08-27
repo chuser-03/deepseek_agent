@@ -7,11 +7,26 @@ import mimetypes
 import shutil
 import uuid
 
-import graphrag.api as api
-from graphrag.config.load_config import load_config
-from graphrag.config.enums import IndexingMethod
-from graphrag.logger.rich_progress import RichProgressLogger
-from graphrag.index.typing.pipeline_run_result import PipelineRunResult
+# Lazy import graphrag to avoid torch DLL issues on startup
+api = None
+load_config = None
+IndexingMethod = None
+RichProgressLogger = None
+PipelineRunResult = None
+
+def _load_graphrag():
+    global api, load_config, IndexingMethod, RichProgressLogger, PipelineRunResult
+    if api is None:
+        import graphrag.api as _api
+        from graphrag.config.load_config import _load_config
+        from graphrag.config.enums import _IndexingMethod
+        from graphrag.logger.rich_progress import _RichProgressLogger
+        from graphrag.index.typing.pipeline_run_result import _PipelineRunResult
+        api = _api
+        load_config = _load_config
+        IndexingMethod = _IndexingMethod
+        RichProgressLogger = _RichProgressLogger
+        PipelineRunResult = _PipelineRunResult
 
 from app.core.config import settings
 from app.core.logger import get_logger
@@ -106,6 +121,7 @@ class IndexingService:
             }
             
             # 加载配置
+            _load_graphrag()
             graphrag_config = load_config(
                 Path(self.data_dir),
                 Path(config_path),
@@ -113,6 +129,7 @@ class IndexingService:
             )
             
             # 创建进度记录器
+            _load_graphrag()
             progress_logger = RichProgressLogger(prefix="graphrag-index")
             
             logger.info(f"开始{'增量更新' if is_update else '构建'}索引: {input_file_path}")
@@ -120,6 +137,7 @@ class IndexingService:
             logger.info(f"输出目录: {user_output_dir}")
             
             # 执行索引构建
+            _load_graphrag()
             index_result = await api.build_index(
                 config=graphrag_config,
                 method=IndexingMethod.Standard,
